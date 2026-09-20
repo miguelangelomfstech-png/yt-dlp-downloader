@@ -93,12 +93,18 @@ public class DownloadService {
         sendEventSafe(state.emitter, new ProgressEvent("STARTING", 0, "", "", "Starting download engine..."));
         
         try {
-            int exitCode = executeYtDlpWithProgress(url, state.tempDir, state.emitter);
+            StringBuilder errorLog = new StringBuilder();
+            int exitCode = executeYtDlpWithProgress(url, state.tempDir, state.emitter, errorLog);
 
             if (exitCode != 0) {
-                log.error("yt-dlp exited with code {} for job {}", exitCode, jobId);
+                log.error("yt-dlp exited with code {} for job {}. Log: {}", exitCode, jobId, errorLog);
                 state.error = true;
-                sendEventSafe(state.emitter, ProgressEvent.error("Engine exited with code " + exitCode + ". Invalid URL or private video."));
+                
+                String cleanError = errorLog.toString().replaceAll("\n", " | ").trim();
+                if (cleanError.isEmpty()) cleanError = "Unknown error";
+                if (cleanError.length() > 100) cleanError = cleanError.substring(cleanError.length() - 100);
+
+                sendEventSafe(state.emitter, ProgressEvent.error("Error: " + cleanError));
                 cleanUp(state.tempDir);
                 state.emitter.complete();
                 return;
@@ -133,7 +139,7 @@ public class DownloadService {
         }
     }
 
-    private int executeYtDlpWithProgress(String url, Path targetDir, SseEmitter emitter) throws IOException, InterruptedException {
+    private int executeYtDlpWithProgress(String url, Path targetDir, SseEmitter emitter, StringBuilder errorLog) throws IOException, InterruptedException {
         String outputTemplate = targetDir.toAbsolutePath() + "/%(title)s.%(ext)s";
 
         // --newline forces yt-dlp to print progress on new lines instead of carriage returns (\r)
@@ -148,9 +154,15 @@ public class DownloadService {
 
         Process process = pb.start();
 
+        // Keep last 5 lines for error reporting
+        java.util.LinkedList<String> lastLines = new java.util.LinkedList<>();
+
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
             String line;
             while ((line = reader.readLine()) != null) {
+                lastLines.add(line);
+                if (lastLines.size() > 5) lastLines.removeFirst();
+                
                 // Parse yt-dlp output for progress
                 if (line.startsWith("[download]")) {
                     Matcher m = PROGRESS_PATTERN.matcher(line);
@@ -172,6 +184,15 @@ public class DownloadService {
                     log.debug("[yt-dlp] {}", line);
                 }
             }
+        }
+        
+        for (String l : lastLines) {
+            if (l.contains("ERROR:") || l.contains("WARNING:")) {
+                errorLog.append(l).append("\n");
+            }
+        }
+        if (errorLog.length() == 0 && !lastLines.isEmpty()) {
+             errorLog.append(lastLines.getLast());
         }
 
         return process.waitFor();
