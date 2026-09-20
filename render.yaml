@@ -1,0 +1,14 @@
+# Render.com Blueprint Specification
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: yt-dlp-downloader
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: APP_YTDLP_EXECUTABLE
+        value: yt-dlp
