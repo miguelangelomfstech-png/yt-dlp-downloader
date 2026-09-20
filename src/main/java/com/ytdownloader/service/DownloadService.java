@@ -147,6 +147,7 @@ public class DownloadService {
                 ytDlpExecutable,
                 "--newline",
                 "--no-playlist",
+                "--extractor-args", "youtube:player_client=android,web",
                 "-o", outputTemplate,
                 url
         );
